@@ -1,2 +1,6 @@
 # XRBrowser
-Unityでブラウザーを表示するやつ
+UnityでWebViewブラウザーを表示するやつ
+
+Scriptsは任意のフォルダに
+webviewcpuはAssets/Plugins/Android/に入れてもらえればブラウザを表示する
+bitmapを持ってきて表示しているだけなんだけど
