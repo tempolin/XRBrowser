@@ -1,190 +1,244 @@
-package webviewcpu;
+using UnityEngine;
 
-import android.app.Activity;
-import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.os.Handler;
-import android.os.Looper;
-import android.os.SystemClock;
-import android.view.KeyEvent;
-import android.view.MotionEvent;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
+public class CpuWebViewTexture : MonoBehaviour
+{
+    [Header("Render Target")]
+    public Renderer targetRenderer;     // QuadのRendererを入れる
+    public int width = 512;
+    public int height = 512;
+    public int fps = 5;
 
-import org.json.JSONObject;
+    [Header("Ray Input (optional)")]
+    public Camera rayCamera;            // CenterEye Camera（無ければ Camera.main）
+    public Collider targetCollider;      // QuadのCollider（無ければ自動取得）
+    public bool enableMouseTapDebug = true;
 
-public class WebViewCpuBridge {
-    private final int width, height;
-    private WebView webView;
-    private Bitmap bitmap;
-    private Canvas canvas;
+    [Header("Debug Text (optional)")]
+    public bool enableKeyboardDebug = false;
+    public string testText = "hello quest";
 
-    private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private volatile boolean ready = false;
+    [Header("URL")]
+    public string startUrl = "https://www.google.com";
 
-    public WebViewCpuBridge(Activity activity, int width, int height) {
-        this.width = width;
-        this.height = height;
+    private Texture2D tex;
 
-        mainHandler.post(() -> {
-            webView = new WebView(activity);
-            webView.setWillNotDraw(false);
+#if UNITY_ANDROID && !UNITY_EDITOR
+    private AndroidJavaObject bridge;
+#endif
 
-            WebSettings s = webView.getSettings();
-            s.setJavaScriptEnabled(true);
-            s.setDomStorageEnabled(true);
+    // --- ログ制御用 ---
+    float _nextLogTime = 0f;
+    string _lastLog = "";
 
-            // これがないと draw が安定しないことがある
-            webView.setLayerType(WebView.LAYER_TYPE_SOFTWARE, null);
+    void LogPerSecond(string msg)
+    {
+#if UNITY_EDITOR
+        return; // Editorでは抑制（必要なら消してOK）
+#endif
+        if (Time.time < _nextLogTime) return;
+        _nextLogTime = Time.time + 1f;
 
-            webView.layout(0, 0, width, height);
+        if (msg == _lastLog) return;
+        _lastLog = msg;
 
-            bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            canvas = new Canvas(bitmap);
-
-            ready = true;
-        });
+        Debug.Log("[CPUWebView] " + msg);
     }
 
-    public void loadUrl(String url) {
-        mainHandler.post(() -> {
-            if (!ready || webView == null)
-                return;
-            webView.loadUrl(url);
-        });
-    }
-
-    // -------------------------
-    // Input: Tap / Key / Text
-    // -------------------------
-
-    // (x,y) は WebView ピクセル座標（左上原点, 0..width / 0..height）
-    public void tap(float x, float y) {
-        if (!ready || webView == null)
+    void Start()
+    {
+        // --- 安全ガード ---
+        if (targetRenderer == null)
+        {
+            Debug.LogError("[CPUWebView] targetRenderer is NULL. Assign Quad's Renderer in Inspector.");
+            enabled = false;
             return;
+        }
 
-        mainHandler.post(() -> {
-            long now = SystemClock.uptimeMillis();
-            MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);
-            MotionEvent up = MotionEvent.obtain(now, now + 10, MotionEvent.ACTION_UP, x, y, 0);
-            webView.dispatchTouchEvent(down);
-            webView.dispatchTouchEvent(up);
-            down.recycle();
-            up.recycle();
-        });
+        // Collider 自動取得（QuadにBoxCollider推奨）
+        if (targetCollider == null)
+            targetCollider = targetRenderer.GetComponent<Collider>();
+
+        // Texture 作成
+        tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+        tex.wrapMode = TextureWrapMode.Clamp;
+        tex.filterMode = FilterMode.Bilinear;
+
+        // Quadに貼る（上下反転はUVで対応）
+        var mat = targetRenderer.material;
+        mat.mainTexture = tex;
+        mat.mainTextureScale = new Vector2(1f, -1f);
+        mat.mainTextureOffset = new Vector2(0f, 1f);
+
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            using var unityPlayer = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+            var activity = unityPlayer.GetStatic<AndroidJavaObject>("currentActivity");
+
+            LogPerSecond("creating bridge");
+            bridge = new AndroidJavaObject("webviewcpu.WebViewCpuBridge", activity, width, height);
+            LogPerSecond("bridge created");
+
+            if (!string.IsNullOrEmpty(startUrl))
+            {
+                LoadUrl(startUrl);
+                LogPerSecond("loadUrl called");
+            }
+
+            // 少し待ってからキャプチャ開始（描画前の真っ黒回避）
+            InvokeRepeating(nameof(PullFrame), 1.5f, 1f / Mathf.Max(1, fps));
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError("[CPUWebView] Start Exception: " + e);
+        }
+#endif
     }
 
-    public void key(int keyCode) {
-        if (!ready || webView == null)
-            return;
+    void Update()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        if (bridge == null) return;
 
-        mainHandler.post(() -> {
-            webView.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, keyCode));
-            webView.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, keyCode));
-        });
-    }
+        // --- デバッグ：マウスクリックでtap（Editor/PC用） ---
+        if (enableMouseTapDebug)
+        {
+            var cam = rayCamera != null ? rayCamera : Camera.main;
+            if (cam != null && targetCollider != null)
+            {
+                if (Input.GetMouseButtonDown(0))
+                {
+                    var ray = cam.ScreenPointToRay(Input.mousePosition);
+                    if (Physics.Raycast(ray, out var hit, 100f))
+                    {
+                        if (hit.collider == targetCollider)
+                        {
+                            Vector2 uv = hit.textureCoord; // 0..1
+                            float x = uv.x * width;
+                            float y = (1f - uv.y) * height;
 
-    public void keyEnter() {
-        key(KeyEvent.KEYCODE_ENTER);
-    }
-
-    // 端末差が出るので「おまけ」。基本は setFocusedInputValue 推奨
-    public void text(String s) {
-        if (!ready || webView == null)
-            return;
-
-        mainHandler.post(() -> {
-            for (int i = 0; i < s.length(); i++) {
-                KeyEvent[] events = KeyEvent.getEvents(String.valueOf(s.charAt(i)));
-                if (events != null) {
-                    for (KeyEvent e : events)
-                        webView.dispatchKeyEvent(e);
+                            TapPixel(x, y);
+                            LogPerSecond($"tap x={x:0} y={y:0}");
+                        }
+                    }
                 }
             }
-        });
+        }
+
+        // --- デバッグ：Spaceで全文入力+Enter ---
+        if (enableKeyboardDebug)
+        {
+            if (Input.GetKeyDown(KeyCode.Space))
+            {
+                SetFocusedInputValue(testText);
+                Enter();
+                LogPerSecond("setFocusedInputValue + enter");
+            }
+        }
+#endif
     }
 
-    // 安定：フォーカス中の input/textarea に値を流し込む
-    public void setFocusedInputValue(String value) {
-        if (!ready || webView == null)
-            return;
+    // -------------------------
+    // Public API（他スクリプトから呼ぶ用）
+    // -------------------------
 
-        final String quoted = JSONObject.quote(value);
-        final String js = "(function(){"
-                + "var e=document.activeElement;"
-                + "if(e && ('value' in e)){"
-                + "  e.value=" + quoted + ";"
-                + "  e.dispatchEvent(new Event('input',{bubbles:true}));"
-                + "}"
-                + "})();";
+    public void LoadUrl(string url)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        bridge?.Call("loadUrl", url);
+#endif
+    }
 
-        mainHandler.post(() -> webView.evaluateJavascript(js, null));
+    // WebView ピクセル座標（左上原点）
+    public void TapPixel(float x, float y)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        bridge?.Call("tap", x, y);
+#endif
+    }
+
+    // 1文字/文字列を「カーソル位置に挿入」
+    public void InsertText(string s)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        bridge?.Call("insertText", s);
+#endif
+    }
+
+    // 入力欄に「全文」を反映（安定）
+    public void SetFocusedInputValue(string s)
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        bridge?.Call("setFocusedInputValue", s);
+#endif
+    }
+
+    public void Backspace()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        bridge?.Call("backspace");
+#endif
+    }
+
+    public void Enter()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        bridge?.Call("enter");
+#endif
+    }
+
+    public string GetFocusedInfoJson()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        return bridge?.Call<string>("getFocusedInfoJson");
+#else
+        return null;
+#endif
     }
 
     // -------------------------
     // Capture
     // -------------------------
 
-    public byte[] captureRgba() {
-        if (!ready || webView == null)
-            return null;
+    void PullFrame()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            var rgba = bridge?.Call<byte[]>("captureRgba");
 
-        // UIスレッドで draw して同期する
-        final Object lock = new Object();
-        final boolean[] done = { false };
+            if (rgba == null)
+            {
+                LogPerSecond("rgba = null");
+                return;
+            }
+            if (rgba.Length != width * height * 4)
+            {
+                LogPerSecond($"rgba bad len={rgba.Length}");
+                return;
+            }
 
-        mainHandler.post(() -> {
-            try {
-                webView.draw(canvas);
-            } catch (Exception ignored) {
-            }
-            synchronized (lock) {
-                done[0] = true;
-                lock.notifyAll();
-            }
-        });
+            tex.LoadRawTextureData(rgba);
+            tex.Apply(false, false);
 
-        synchronized (lock) {
-            try {
-                if (!done[0])
-                    lock.wait(50);
-            } catch (InterruptedException ignored) {
-            }
+            LogPerSecond($"rgba ok len={rgba.Length}");
         }
-
-        int[] pixels = new int[width * height];
-        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
-
-        byte[] out = new byte[width * height * 4];
-        for (int i = 0; i < pixels.length; i++) {
-            int c = pixels[i]; // ARGB
-            int a = (c >> 24) & 0xFF;
-            int r = (c >> 16) & 0xFF;
-            int g = (c >> 8) & 0xFF;
-            int b = (c) & 0xFF;
-
-            int o = i * 4;
-            out[o] = (byte) r;
-            out[o + 1] = (byte) g;
-            out[o + 2] = (byte) b;
-            out[o + 3] = (byte) a;
+        catch (System.Exception e)
+        {
+            Debug.LogError("[CPUWebView] PullFrame Exception: " + e);
         }
-        return out;
+#endif
     }
 
-    // -------------------------
-    // Cleanup
-    // -------------------------
-
-    public void dispose() {
-        mainHandler.post(() -> {
-            if (webView != null) {
-                webView.destroy();
-                webView = null;
-            }
-            bitmap = null;
-            canvas = null;
-            ready = false;
-        });
+    void OnDestroy()
+    {
+#if UNITY_ANDROID && !UNITY_EDITOR
+        try
+        {
+            bridge?.Call("dispose");
+        }
+        catch { }
+        bridge = null;
+#endif
     }
 }
