@@ -1,65 +1,32 @@
-using UnityEngine;
+ï»¿using UnityEngine;
 using TMPro;
 
 public class XriKeyboardToWebBridge : MonoBehaviour
 {
-    [Header("Input from XRI Keyboard")]
-    public TMP_InputField input;
+    public TMP_InputField input;      // è‡ªåˆ†ï¼ˆWorld Space TMP_InputFieldï¼‰
+    public CpuWebViewTexture web;     // WebQuadã® CpuWebViewTexture
 
-    [Header("Android WebView bridge")]
-    public WebViewCpuClient web;
-
-    [Header("Send throttling (seconds)")]
     public float sendInterval = 0.08f; // 80ms
-
-    private float timer;
-    private string lastSent = "";
+    float t;
+    string last = "";
 
     void Reset()
     {
         input = GetComponent<TMP_InputField>();
     }
 
-    void OnEnable()
-    {
-        if (input == null) return;
-        input.onValueChanged.AddListener(OnChanged);
-        input.onEndEdit.AddListener(OnEndEdit);
-    }
-
-    void OnDisable()
-    {
-        if (input == null) return;
-        input.onValueChanged.RemoveListener(OnChanged);
-        input.onEndEdit.RemoveListener(OnEndEdit);
-    }
-
-    void OnChanged(string _)
-    {
-        // Update() ‘¤‚ÅŠÔˆø‚¢‚Ä‘—‚é
-    }
-
     void Update()
     {
-        if (input == null || web == null) return;
+        if (!input || !web) return;
 
-        timer += Time.deltaTime;
-        if (timer < sendInterval) return;
-        timer = 0f;
+        t += Time.deltaTime;
+        if (t < sendInterval) return;
+        t = 0f;
 
         var cur = input.text ?? "";
-        if (cur == lastSent) return;
+        if (cur == last) return;
 
-        // ˆÀ’èF‘S•¶‚ğŠÛ‚²‚Æ Web ‚É”½‰f
         web.SetFocusedInputValue(cur);
-        lastSent = cur;
-    }
-
-    void OnEndEdit(string finalText)
-    {
-        if (web == null) return;
-
-        web.SetFocusedInputValue(finalText ?? "");
-        lastSent = finalText ?? "";
+        last = cur;
     }
 }
