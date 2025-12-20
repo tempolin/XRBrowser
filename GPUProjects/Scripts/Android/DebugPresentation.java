@@ -9,7 +9,6 @@ import android.view.Display;
 import android.view.Gravity;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-
 import android.util.Log;
 
 public class DebugPresentation extends Presentation {
@@ -34,11 +33,11 @@ public class DebugPresentation extends Presentation {
         root.setPadding(40, 40, 40, 40);
 
         TextView title = new TextView(getContext());
-        title.setText("CP2.5 Presentation (PRIVATE)");
+        title.setText("CP2 Presentation (Stable)");
         title.setTextSize(24);
 
         TextView info = new TextView(getContext());
-        info.setText("Updates ~60fps to force frames.");
+        info.setText("Updates every 1s to force frames.");
         info.setTextSize(18);
 
         TextView counter = new TextView(getContext());
@@ -48,7 +47,6 @@ public class DebugPresentation extends Presentation {
         root.addView(title);
         root.addView(info);
         root.addView(counter);
-
         setContentView(root);
 
         Log.i(TAG_I, "Presentation onCreate displayId=" + getDisplay().getDisplayId());
@@ -60,16 +58,16 @@ public class DebugPresentation extends Presentation {
                 tick++;
                 counter.setText("tick: " + tick);
 
-                // たまに重要ログ（出しすぎ防止）
-                if (tick % 600 == 0) { // 60fpsなら約10秒ごと
+                // 5秒に1回だけログ（見える/動いてる確認）
+                if (tick % 5 == 0) {
                     Log.i(TAG_I, "Presentation tick=" + tick);
                 }
 
-                uiHandler.postDelayed(this, 16); // 約60fps
+                uiHandler.postDelayed(this, 1000); // ★安定：1秒更新
             }
         };
 
-        // 最初から回す（初動で迷子になりにくい）
+        // すぐ開始
         uiHandler.post(tickTask);
     }
 
