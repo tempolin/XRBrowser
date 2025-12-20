@@ -14,7 +14,6 @@ import android.util.Log;
 
 public class DebugPresentation extends Presentation {
 
-    // Logcat検索用（MainActivityと合わせる）
     private static final String TAG_I = "CP2_IMPORTANT";
 
     private Handler uiHandler;
@@ -35,14 +34,13 @@ public class DebugPresentation extends Presentation {
         root.setPadding(40, 40, 40, 40);
 
         TextView title = new TextView(getContext());
-        title.setText("CP2 Presentation (PRIVATE)");
+        title.setText("CP2.5 Presentation (PRIVATE)");
         title.setTextSize(24);
 
         TextView info = new TextView(getContext());
-        info.setText("This text updates every 1s to force frames.");
+        info.setText("Updates ~60fps to force frames.");
         info.setTextSize(18);
 
-        // ★これが「動いてる」目視確認ポイント
         TextView counter = new TextView(getContext());
         counter.setTextSize(22);
         counter.setText("tick: 0");
@@ -55,7 +53,6 @@ public class DebugPresentation extends Presentation {
 
         Log.i(TAG_I, "Presentation onCreate displayId=" + getDisplay().getDisplayId());
 
-        // ★1秒ごとに表示を更新 → VirtualDisplayにフレームを発生させやすくする
         uiHandler = new Handler(Looper.getMainLooper());
         tickTask = new Runnable() {
             @Override
@@ -64,19 +61,20 @@ public class DebugPresentation extends Presentation {
                 counter.setText("tick: " + tick);
 
                 // たまに重要ログ（出しすぎ防止）
-                if (tick % 600 == 0) {
+                if (tick % 600 == 0) { // 60fpsなら約10秒ごと
                     Log.i(TAG_I, "Presentation tick=" + tick);
                 }
 
                 uiHandler.postDelayed(this, 16); // 約60fps
             }
         };
-        uiHandler.postDelayed(tickTask, 200); // 最初の更新を早めに
+
+        // 最初から回す（初動で迷子になりにくい）
+        uiHandler.post(tickTask);
     }
 
     @Override
     public void dismiss() {
-        // 後始末（リーク防止）
         try {
             if (uiHandler != null && tickTask != null) {
                 uiHandler.removeCallbacks(tickTask);

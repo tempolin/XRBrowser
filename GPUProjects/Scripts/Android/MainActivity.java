@@ -20,10 +20,8 @@ import androidx.appcompat.app.AppCompatActivity;
 
 public class MainActivity extends AppCompatActivity {
 
-    // 重要ログ（Logcat検索欄にこれを入れる）
+    // Logcat検索用
     private static final String TAG_I = "CP2_IMPORTANT";
-    // 詳細ログ（必要なときだけ見る）
-    private static final String TAG_D = "CP2";
 
     private VirtualDisplay virtualDisplay;
     private ImageReader imageReader;
@@ -36,10 +34,14 @@ public class MainActivity extends AppCompatActivity {
 
     private static final int W = 512;
     private static final int H = 512;
-    private static final int MAX_IMAGES = 3;
+    private static final int MAX_IMAGES = 5; // ★詰まりにくくするため 3→5 推奨
 
     private int frames = 0;
     private long lastTs = 0;
+
+    // FPS計測用
+    private long fpsT0Ns = 0;
+    private int fpsFrames = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -49,7 +51,7 @@ public class MainActivity extends AppCompatActivity {
 
         tv = new TextView(this);
         tv.setTextSize(16);
-        tv.setText("CP2 PRIVATE starting... (Logcat search: CP2_IMPORTANT)");
+        tv.setText("CP2.5 starting... (Logcat search: CP2_IMPORTANT)");
         setContentView(tv);
 
         startCP2Private();
@@ -65,7 +67,6 @@ public class MainActivity extends AppCompatActivity {
             imageHandler = new Handler(imageThread.getLooper());
             Log.i(TAG_I, "HandlerThread started");
 
-            // PRIVATE
             imageReader = ImageReader.newInstance(
                     W, H,
                     ImageFormat.PRIVATE,
@@ -81,13 +82,11 @@ public class MainActivity extends AppCompatActivity {
                     surface,
                     DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION
                             | DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC
-                            | DisplayManager.VIRTUAL_DISPLAY_FLAG_OWN_CONTENT_ONLY
             );
 
             Display vdDisplay = virtualDisplay.getDisplay();
             Log.i(TAG_I, "VirtualDisplay OK displayId=" + vdDisplay.getDisplayId());
 
-            // VirtualDisplay上に固定UIを描かせる
             presentation = new DebugPresentation(this, vdDisplay);
             presentation.show();
             Log.i(TAG_I, "Presentation show()");
@@ -100,27 +99,41 @@ public class MainActivity extends AppCompatActivity {
 
                     frames++;
                     long ts = img.getTimestamp();
+                    lastTs = ts;
 
                     HardwareBuffer hb = img.getHardwareBuffer();
                     boolean hasHb = (hb != null);
                     if (hb != null) hb.close();
 
-                    // 重要ログ：10フレームごと（出しすぎ防止）
+                    // 10フレームごとの動作確認ログ（控えめ）
                     if ((frames % 10) == 0) {
-                        lastTs = ts;
                         Log.i(TAG_I, "frame=" + frames + " hb=" + hasHb + " ts=" + ts);
+                    }
 
+                    // FPS計測（1秒ごとに出す）
+                    fpsFrames++;
+                    long nowNs = System.nanoTime();
+                    if (fpsT0Ns == 0) fpsT0Ns = nowNs;
+
+                    long dtNs = nowNs - fpsT0Ns;
+                    if (dtNs >= 1_000_000_000L) {
+                        float fps = fpsFrames * 1_000_000_000f / dtNs;
+                        Log.i(TAG_I, String.format("FPS=%.1f (hb=%s)", fps, hasHb));
+
+                        fpsT0Ns = nowNs;
+                        fpsFrames = 0;
+
+                        // 画面にも表示（更新は1秒に1回だけ）
+                        float fpsForUi = fps;
                         runOnUiThread(() -> tv.setText(
-                                "CP2 PRIVATE running\n" +
+                                "CP2.5 running\n" +
                                         "W,H=" + W + "," + H + "\n" +
                                         "frames=" + frames + "\n" +
                                         "lastTs=" + lastTs + "\n" +
-                                        "hb=" + hasHb + "\n" +
+                                        "FPS=" + String.format("%.1f", fpsForUi) + "\n" +
+                                        "hb(last)=" + hasHb + "\n" +
                                         "Logcat search: CP2_IMPORTANT"
                         ));
-                    } else {
-                        // 詳細ログ（必要なら）
-                        // Log.d(TAG_D, "frame=" + frames + " hb=" + hasHb);
                     }
 
                 } catch (Throwable t) {
@@ -130,12 +143,12 @@ public class MainActivity extends AppCompatActivity {
                 }
             }, imageHandler);
 
-            tv.setText("CP2 PRIVATE running... (Logcat search: CP2_IMPORTANT)");
+            tv.setText("CP2.5 running... (Logcat search: CP2_IMPORTANT)");
             Log.i(TAG_I, "Listener set. Waiting frames...");
 
         } catch (Throwable t) {
             Log.e(TAG_I, "startCP2Private failed", t);
-            tv.setText("CP2 PRIVATE failed:\n" + t);
+            tv.setText("CP2.5 failed:\n" + t);
         }
     }
 
