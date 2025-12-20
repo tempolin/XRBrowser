@@ -3,13 +3,14 @@
 public class CpuWebViewTexture : MonoBehaviour
 {
     [Header("Render")]
-    public Renderer targetRenderer;    // ★WebQuadのRenderer（自分のRendererでもOK）
+    public Renderer targetRenderer;
     public int width = 1024;
     public int height = 1024;
-    public int fps = 10;              // CPU重いので 5〜10 推奨
+    public int fps = 10;
     public string startUrl = "https://www.google.com";
 
     Texture2D tex;
+    byte[] rgbaBuf; // ★追加：Unity側で1回だけ確保して使い回す
 
 #if UNITY_ANDROID && !UNITY_EDITOR
     AndroidJavaObject bridge;
@@ -17,7 +18,6 @@ public class CpuWebViewTexture : MonoBehaviour
 
     void Awake()
     {
-        // Quadに貼るTextureを用意
         if (targetRenderer == null) targetRenderer = GetComponent<Renderer>();
         if (targetRenderer == null)
         {
@@ -30,10 +30,11 @@ public class CpuWebViewTexture : MonoBehaviour
         tex.wrapMode = TextureWrapMode.Clamp;
         tex.filterMode = FilterMode.Bilinear;
 
+        // ★追加：使い回しバッファ（1回だけ）
+        rgbaBuf = new byte[width * height * 4];
+
         var mat = targetRenderer.material;
         mat.mainTexture = tex;
-
-        // WebViewが上下逆になることが多いのでUVで反転
         mat.mainTextureScale = new Vector2(1f, -1f);
         mat.mainTextureOffset = new Vector2(0f, 1f);
 
@@ -50,7 +51,6 @@ public class CpuWebViewTexture : MonoBehaviour
         if (!string.IsNullOrEmpty(startUrl))
             bridge?.Call("loadUrl", startUrl);
 
-        // 少し待ってからキャプチャ開始（真っ黒回避）
         InvokeRepeating(nameof(PullFrame), 1.5f, 1f / Mathf.Max(1, fps));
 #endif
     }
@@ -58,15 +58,22 @@ public class CpuWebViewTexture : MonoBehaviour
     void PullFrame()
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
-        if (bridge == null || tex == null) return;
+        if (bridge == null || tex == null || rgbaBuf == null) return;
 
-        var rgba = bridge.Call<byte[]>("captureRgba");
-        if (rgba == null || rgba.Length != width * height * 4) return;
+        // ★変更：戻り値 byte[] ではなく、Unityの配列に書き込ませる
+        bool ok = bridge.Call<bool>("captureInto", rgbaBuf);
+        if (!ok)
+        {
+            Debug.LogWarning("[WebViewCapture] captureInto failed");
+            return;
+        }
 
-        tex.LoadRawTextureData(rgba);
+        tex.LoadRawTextureData(rgbaBuf);
         tex.Apply(false, false);
 #endif
     }
+
+
 
     void OnDestroy()
     {
@@ -74,9 +81,10 @@ public class CpuWebViewTexture : MonoBehaviour
         try { bridge?.Call("dispose"); } catch { }
         bridge = null;
 #endif
+        if (tex != null) { Destroy(tex); tex = null; }
+        rgbaBuf = null;
     }
 
-    // ---- Web API（他スクリプトから呼ぶ） ----
     public void LoadUrl(string url)
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
@@ -84,7 +92,6 @@ public class CpuWebViewTexture : MonoBehaviour
 #endif
     }
 
-    // WebViewの左上原点ピクセル座標
     public void TapPixel(float x, float y)
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
