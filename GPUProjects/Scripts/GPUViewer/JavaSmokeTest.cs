@@ -1,78 +1,43 @@
-using System;
-using UnityEngine;
+﻿using UnityEngine;
 using TMPro;
 
 public class JavaSmokeTest : MonoBehaviour
 {
     public TextMeshProUGUI text;
 
+    void Awake()
+    {
+        if (text == null) text = GetComponentInChildren<TextMeshProUGUI>(true);
+    }
+
     void Start()
     {
 #if UNITY_ANDROID && !UNITY_EDITOR
-        Clear();
-        Line("JAVA-SMOKE (screen)");
-        Line("Start reached ✅");
-
-        // パス情報（目視用）
-        Line("persistentDataPath:");
-        Line(Application.persistentDataPath);
-        Line("temporaryCachePath:");
-        Line(Application.temporaryCachePath);
-        Line("streamingAssetsPath:");
-        Line(Application.streamingAssetsPath);
-        Line("dataPath:");
-        Line(Application.dataPath);
-
         try
         {
-            Line("");
-            Line("Step1: new AndroidJavaClass...");
+            Write("JAVA-SMOKE\nStart reached");
+
             using var cls = new AndroidJavaClass("com.example.webviewgpu.NativeBridge");
-            Line("Step1 OK ✅ (class found)");
 
-            Line("Step2: CallStatic<int>(getMagicNumber)...");
             int v = cls.CallStatic<int>("getMagicNumber");
-            Line("Step2 OK ✅");
-            Line("getMagicNumber = " + v);
+            Write($"JAVA-SMOKE\ngetMagicNumber={v}");
 
-            // もしここまで出たら完全に通電してる
-            Line("");
-            Line("RESULT: JAVA -> C# OK ✅");
+            // ★Step1
+            int r = cls.CallStatic<int>("nativeAdd", 2, 3);
+            Write($"JAVA-SMOKE\nnativeAdd(2,3)={r}");
         }
-        catch (AndroidJavaException aje)
+        catch (System.Exception e)
         {
-            Line("");
-            Line("RESULT: AndroidJavaException ❌");
-            Line("Type: " + aje.GetType().FullName);
-            Line("Msg: " + aje.Message);
-            Line("");
-            Line("Stack:");
-            Line(aje.StackTrace);
-        }
-        catch (Exception e)
-        {
-            Line("");
-            Line("RESULT: Exception ❌");
-            Line("Type: " + e.GetType().FullName);
-            Line("Msg: " + e.Message);
-            Line("");
-            Line("Stack:");
-            Line(e.StackTrace);
+            Write("JAVA-SMOKE\nEX\n" + e.GetType().Name + "\n" + e.Message);
         }
 #else
-        Clear();
-        Line("JAVA-SMOKE");
-        Line("editor (not running on Android)");
+        Write("JAVA-SMOKE\neditor");
 #endif
     }
 
-    void Clear()
+    void Write(string s)
     {
-        if (text) text.text = "";
-    }
-
-    void Line(string s)
-    {
-        if (text) text.text += s + "\n";
+        if (text != null) text.text = s;
+        Debug.Log(s);
     }
 }
